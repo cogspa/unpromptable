@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+@theme {
+  --color-sage: #B9BF8E;
+  --color-gold: #F2C029;
+  --color-amber: #F2B04B;
+  --color-offwhite: #F2F2F2;
+  --color-nearblack: #0D0D0D;
+  --color-dark: #121212;
+
+  --font-gunter: "gunter", sans-serif;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-nearblack);
+    color: var(--color-offwhite);
+  }
+}
