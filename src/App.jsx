@@ -617,9 +617,18 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-nearblack text-offwhite font-sans overflow-x-hidden">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(242,192,41,0.12),transparent_30%),radial-gradient(circle_at_80%_20%,rgba(242,176,75,0.08),transparent_25%),radial-gradient(circle_at_20%_80%,rgba(185,191,142,0.08),transparent_25%)] pointer-events-none" />
-      <div className="relative mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-nearblack text-offwhite font-sans overflow-x-hidden relative">
+      {/* Background Video */}
+      <video
+        autoPlay
+        loop
+        muted
+        playsInline
+        className="fixed inset-0 w-full h-full object-cover z-[1] pointer-events-none opacity-50"
+        src="/fastsketch-bg.mp4"
+      />
+      <div className="fixed inset-0 bg-gradient-to-b from-nearblack/30 via-nearblack/40 to-nearblack/60 z-[2] pointer-events-none" />
+      <div className="relative z-[3] mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <header className="flex flex-col gap-6 rounded-[32px] border border-sage/20 bg-sage/5 p-6 shadow-2xl backdrop-blur lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
             <h1 className="mt-1 font-gunter text-5xl font-normal tracking-widest text-gold drop-shadow-xl uppercase sm:text-6xl lg:text-7xl leading-none">
