@@ -3,42 +3,45 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Float, Environment, ContactShadows, useGLTF, Center } from "@react-three/drei";
 import { motion, AnimatePresence } from "framer-motion";
 import { Upload, PencilLine, Sparkles, Eye, Lock, Globe, RotateCcw, Eraser, Download, Box, Loader2, CheckCircle2, ChevronRight, X } from "lucide-react";
+import thromper2DImage from "./assets/thromper2D.png";
+import thromper3DUrl from "./assets/Thromper3D.glb";
+import piscador2DImage from "./assets/piscador2D.png";
+import piscador3DUrl from "./assets/piscador3D.glb";
+import cyberattion2DImage from "./assets/Cyberattion2D.png";
+import cyberattion3DUrl from "./assets/cyberattion3d.glb";
 
 const starterWorks = [
   {
     id: 1,
-    title: "Bone Choir",
+    title: "Thromper",
     artist: "Guest Artist",
     tags: ["surreal", "biomechanical", "creature"],
     visibility: "Public",
-    image:
-      "https://images.unsplash.com/photo-1513364776144-60967b0f800f?auto=format&fit=crop&w=900&q=80",
+    image: thromper2DImage,
     shape: "spikes",
-    modelUrl: null,
+    modelUrl: thromper3DUrl,
     accent: "from-gold/20 to-sage/20",
   },
   {
     id: 2,
-    title: "Soft Engine",
+    title: "Piscador",
     artist: "Guest Artist",
     tags: ["industrial", "organic", "impossible object"],
     visibility: "Public",
-    image:
-      "https://images.unsplash.com/photo-1517048676732-d65bc937f952?auto=format&fit=crop&w=900&q=80",
+    image: piscador2DImage,
     shape: "rings",
-    modelUrl: null,
+    modelUrl: piscador3DUrl,
     accent: "from-amber/20 to-gold/20",
   },
   {
     id: 3,
-    title: "Cathedral Seed",
+    title: "Cyberattion",
     artist: "Guest Artist",
     tags: ["abstract", "sculptural", "artifact"],
     visibility: "Private",
-    image:
-      "https://images.unsplash.com/photo-1515405295579-ba7b45403062?auto=format&fit=crop&w=900&q=80",
+    image: cyberattion2DImage,
     shape: "stack",
-    modelUrl: null,
+    modelUrl: cyberattion3DUrl,
     accent: "from-sage/20 to-amber/20",
   },
 ];
@@ -519,9 +522,57 @@ function CreationFlowDialog({ image, onCancel, onComplete }) {
   );
 }
 
+function ManifestoDialog({ onClose }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md"
+    >
+      <motion.div
+        initial={{ scale: 0.95, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.95, y: 20 }}
+        className="w-full max-w-4xl max-h-[85vh] overflow-hidden rounded-[32px] border border-sage/20 bg-[#0a0b10] shadow-2xl flex flex-col"
+      >
+        <div className="flex items-center justify-between border-b border-sage/10 px-8 py-5 bg-sage/5 shrink-0">
+          <h2 className="text-2xl font-semibold text-gold tracking-tighter uppercase font-gunter">Project Manifesto</h2>
+          <button onClick={onClose} className="rounded-full p-2 text-white/50 transition hover:bg-white/10 hover:text-white">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        
+        <div className="p-8 md:p-12 space-y-6 text-offwhite/80 leading-relaxed text-sm md:text-base overflow-y-auto custom-scrollbar">
+          <p>
+            <strong className="text-white">Unpromptable</strong> is an experimental art & technology project that explores how drawing can become a direct interface for materializing ideas that cannot be fully expressed through words. It begins from a simple premise: not all imagination is promptable. Many concepts are too abstract, emotional, surreal, subconscious, or visually specific to be described through language alone. Some ideas emerge first as gestures, distortions, marks, and forms. Unpromptable creates a system for those ideas to exist by translating drawings into three-dimensional objects and presenting them through both an interactive web platform and a physical participatory art experience.
+          </p>
+          <p>
+            Unpromptable functions as a drawing-to-3D platform and WebGL-based gallery. Users begin either by uploading a drawing or by sketching directly within the site. That image is then sent through an image-to-3D generation pipeline, where it is transformed into a 3D object. The final work is presented in a dual-view format: one panel shows the original drawing, and the other shows the resulting 3D model rotating in a live browser-based viewer. Rather than hiding the source, Unpromptable emphasizes the relationship between raw visual thought and dimensional artifact, allowing viewers to witness the translation of an internal image into form.
+          </p>
+          <p>
+            Beyond the web application, the project extends into the physical world through advanced 3D printing and interactive projection environments. Selected forms generated from user drawings would be materialized as tangible sculptural objects using contemporary 3D printing methods. These printed works would then become part of a live installation enhanced by responsive light, projection, and environmental media created in TouchDesigner. Through projection mapping, motion, and reactive visual systems, the sculptural objects become animated presences rather than static outputs. This creates an immersive environment in which the drawn, the digital, and the physical continuously interact.
+          </p>
+          <p>
+            Unpromptable is not only a web app but a participatory art experience. It invites audiences to engage with the movement from consciousness to subconscious imagery and from imagination into manifestation. A sketch that begins as a fleeting internal form can move through multiple stages: hand-drawn mark, algorithmic translation, digital 3D object, physical print, and interactive light-based installation. The work is therefore about more than technical conversion; it is about revealing the path through which inner images become shareable, tangible, embodied art.
+          </p>
+          <p>
+            The project is also rooted in the belief that culture exists beyond language. Many tools today are shaped around verbal command and text input, yet culture is often formed through image, symbol, ritual, memory, gesture, and the intermixing of lived influences that cannot be reduced to words. Its foundation is deeply connected to Los Angeles, a city defined by layered identities, migration, hybrid visual languages, speculative aesthetics, and constant cultural remixing.
+          </p>
+          <p>
+            Support for this project would help develop both its technical and artistic dimensions: refining the browser-based drawing environment, integrating the image-to-3D workflow, developing the WebGL gallery, fabricating physical works through 3D printing, and building the TouchDesigner-based projection environment. Unpromptable ultimately aims to create a new space where the indescribable can be drawn, generated, manifested, and experienced as living physical art.
+          </p>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+
 export default function App() {
   const [works, setWorks] = useState(starterWorks);
   const [showDrawer, setShowDrawer] = useState(false);
+  const [showManifesto, setShowManifesto] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState("All");
   
   // Creation Flow State
@@ -577,15 +628,15 @@ export default function App() {
             <p className="mt-2 text-xl tracking-widest text-sage sm:text-2xl uppercase">
               Draw what prompts cannot.
             </p>
-            <p className="mt-5 max-w-2xl text-base leading-7 text-offwhite/60 sm:text-lg">
-              A WebGL gallery for ideas beyond words. Upload a drawing or sketch directly on the site, then watch it become a dimensional artifact via Meshy API.
+            <p className="mt-5 max-w-2xl text-base leading-7 text-offwhite/70 sm:text-lg">
+              An experimental art & technology project exploring how drawing becomes a direct interface for materializing ideas that cannot be fully expressed through words. The indescribable can be drawn, generated, manifested, and experienced as living physical art.
             </p>
             <div className="mt-6 flex flex-wrap gap-2">
               {[
                 "Ideas beyond words",
                 "For the truly unpromptable",
                 "Where sketches become dimensions",
-                "Meshy / Bring Your Own Model",
+                "Drawing-to-3D pipeline",
               ].map((line) => (
                 <span key={line} className="rounded-full border border-sage/20 bg-sage/10 px-3 py-1.5 text-xs text-sage/80 font-medium">
                   {line}
@@ -594,15 +645,18 @@ export default function App() {
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
             <button
               onClick={() => setShowDrawer((s) => !s)}
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:opacity-90 z-10"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:opacity-90 z-10"
             >
               <PencilLine className="h-4 w-4" /> {showDrawer ? "Close Drawing Tool" : "Draw on Site"}
             </button>
-            <button className="inline-flex items-center justify-center gap-2 rounded-full border border-white/10 px-5 py-3 text-sm text-white/80 transition hover:bg-white/10 z-10">
-              <Sparkles className="h-4 w-4" /> Explore Gallery
+            <button 
+              onClick={() => setShowManifesto(true)}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-sage/40 bg-sage/10 px-5 py-3 text-sm text-sage hover:bg-sage/20 transition z-10"
+            >
+              <Eye className="h-4 w-4" /> Read Manifesto
             </button>
           </div>
         </header>
@@ -613,9 +667,9 @@ export default function App() {
           <div className="rounded-[28px] border border-sage/20 bg-sage/5 p-6 backdrop-blur">
             <p className="text-sm uppercase tracking-[0.25em] text-sage/70 font-semibold">System Pipeline</p>
             <div className="mt-4 space-y-3 text-sm text-white/70">
-              <div className="rounded-2xl border border-white/10 p-4 flex gap-3"><PencilLine className="h-5 w-5 text-white/50 shrink-0"/> Upload an image or draw natively in the browser.</div>
-              <div className="rounded-2xl border border-white/10 p-4 flex gap-3"><Sparkles className="h-5 w-5 text-white/50 shrink-0"/> Run through Meshy Image-to-3D pipeline OR upload custom .glb</div>
-              <div className="rounded-2xl border border-white/10 p-4 flex gap-3"><Globe className="h-5 w-5 text-white/50 shrink-0"/> Share dual-view WebGL Gallery link</div>
+              <div className="rounded-2xl border border-white/10 p-4 flex gap-3"><PencilLine className="h-5 w-5 text-sage/80 shrink-0"/> Sketch or Upload: Begin with a fleeting internal form—a gesture, mark, or distortion.</div>
+              <div className="rounded-2xl border border-white/10 p-4 flex gap-3"><Sparkles className="h-5 w-5 text-sage/80 shrink-0"/> Algorithmic Translation: Transform the drawing into a digital 3D object dynamically.</div>
+              <div className="rounded-2xl border border-white/10 p-4 flex gap-3"><Box className="h-5 w-5 text-sage/80 shrink-0"/> Physical Manifestation: Future stages involve 3D printing & live interactive projection.</div>
             </div>
           </div>
         </section>
@@ -701,6 +755,9 @@ export default function App() {
             onCancel={() => setPendingImage(null)}
             onComplete={finalizeCreation}
           />
+        )}
+        {showManifesto && (
+          <ManifestoDialog onClose={() => setShowManifesto(false)} />
         )}
       </AnimatePresence>
     </div>
