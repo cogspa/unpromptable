@@ -10,6 +10,11 @@ import piscador3DUrl from "./assets/piscador3D.glb";
 import cyberattion2DImage from "./assets/Cyberattion2D.png";
 import cyberattion3DUrl from "./assets/cyberattion3d.glb";
 
+// Preload all GLB models so they start downloading immediately
+useGLTF.preload(thromper3DUrl);
+useGLTF.preload(piscador3DUrl);
+useGLTF.preload(cyberattion3DUrl);
+
 const starterWorks = [
   {
     id: 1,
@@ -121,6 +126,19 @@ function SpinningForm({ variant = "spikes" }) {
   );
 }
 
+function LoadingFallback3D() {
+  const ref = useRef();
+  useFrame((_, delta) => {
+    if (ref.current) ref.current.rotation.y += delta * 2;
+  });
+  return (
+    <mesh ref={ref}>
+      <octahedronGeometry args={[0.5, 0]} />
+      <meshStandardMaterial color="#F2C029" wireframe opacity={0.6} transparent />
+    </mesh>
+  );
+}
+
 function Viewer3D({ shape, modelUrl }) {
   return (
     <div className="h-[260px] w-full overflow-hidden rounded-2xl border border-white/10 bg-black/30">
@@ -128,7 +146,7 @@ function Viewer3D({ shape, modelUrl }) {
         <color attach="background" args={["#08090d"]} />
         <ambientLight intensity={1.2} />
         <directionalLight position={[3, 4, 4]} intensity={2} />
-        <Suspense fallback={null}>
+        <Suspense fallback={<LoadingFallback3D />}>
           <Float speed={1.5} rotationIntensity={0.3} floatIntensity={0.4}>
             {modelUrl ? <CustomModel url={modelUrl} /> : <SpinningForm variant={shape} />}
           </Float>
@@ -574,9 +592,16 @@ export default function App() {
   const [showDrawer, setShowDrawer] = useState(false);
   const [showManifesto, setShowManifesto] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState("All");
+  const [isLoading, setIsLoading] = useState(true);
   
   // Creation Flow State
   const [pendingImage, setPendingImage] = useState(null);
+
+  // Dismiss loading screen after a short delay to let assets start streaming
+  useEffect(() => {
+    const timer = setTimeout(() => setIsLoading(false), 2500);
+    return () => clearTimeout(timer);
+  }, []);
 
   const filteredWorks = useMemo(() => {
     if (selectedFilter === "All") return works;
@@ -618,6 +643,34 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-nearblack text-offwhite font-sans overflow-x-hidden relative">
+      {/* Loading Screen */}
+      <AnimatePresence>
+        {isLoading && (
+          <motion.div
+            key="loader"
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.8 }}
+            className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-nearblack"
+          >
+            <motion.h1
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="font-gunter text-5xl text-gold tracking-widest uppercase sm:text-6xl"
+            >
+              Unpromptable
+            </motion.h1>
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: "12rem" }}
+              transition={{ duration: 2, ease: "easeInOut" }}
+              className="mt-6 h-0.5 rounded-full bg-gradient-to-r from-sage via-gold to-amber"
+            />
+            <p className="mt-4 text-sm tracking-widest text-offwhite/50 uppercase">Loading assets...</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Background Video */}
       <video
         autoPlay
