@@ -2,7 +2,8 @@ import React, { useMemo, useRef, useState, useEffect, Suspense } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Float, Environment, ContactShadows, useGLTF, Center } from "@react-three/drei";
 import { motion, AnimatePresence } from "framer-motion";
-import { Upload, PencilLine, Sparkles, Eye, Lock, Globe, RotateCcw, Eraser, Download, Box, Loader2, CheckCircle2, ChevronRight, X } from "lucide-react";
+import { Upload, PencilLine, Sparkles, Eye, Lock, Globe, RotateCcw, Eraser, Download, Box, Loader2, CheckCircle2, ChevronRight, X, Key, AlertCircle } from "lucide-react";
+import { getMeshyApiKey, saveMeshyApiKey, generate3DFromImage, simulateMeshyGeneration } from "./services/meshy";
 import thromper2DImage from "./assets/thromper2D.png";
 import thromper3DUrl from "./assets/Thromper3D.glb";
 import piscador2DImage from "./assets/piscador2D.png";
@@ -10,10 +11,14 @@ import piscador3DUrl from "./assets/piscador3D.glb";
 import cyberattion2DImage from "./assets/Cyberattion2D.png";
 import cyberattion3DUrl from "./assets/cyberattion3d.glb";
 
+import monster2DImage from "./assets/generated_monster_sketch.png";
+import monster3DUrl from "./assets/generated_monster.glb";
+
 // Preload all GLB models so they start downloading immediately
 useGLTF.preload(thromper3DUrl);
 useGLTF.preload(piscador3DUrl);
 useGLTF.preload(cyberattion3DUrl);
+useGLTF.preload(monster3DUrl);
 
 const starterWorks = [
   {
@@ -49,10 +54,31 @@ const starterWorks = [
     modelUrl: cyberattion3DUrl,
     accent: "from-sage/20 to-amber/20",
   },
+  {
+    id: 4,
+    title: "Untitled Form 4",
+    artist: "You",
+    tags: ["new", "unpromptable", "custom-upload"],
+    visibility: "Private",
+    image: monster2DImage,
+    shape: "spikes",
+    modelUrl: monster3DUrl,
+    accent: "from-gold/20 to-amber/20",
+  },
 ];
 
+export function resolveModelUrl(url) {
+  if (!url || typeof url !== "string") return url;
+  if (url.startsWith("https://assets.meshy.ai")) {
+    return url.replace("https://assets.meshy.ai", "/meshy-assets");
+  }
+  return url;
+}
+
 function CustomModel({ url }) {
-  const { scene } = useGLTF(url);
+  const resolvedUrl = useMemo(() => resolveModelUrl(url), [url]);
+  const { scene } = useGLTF(resolvedUrl);
+  const clonedScene = useMemo(() => scene.clone(true), [scene]);
   const ref = useRef();
   
   useFrame((_, delta) => {
@@ -63,7 +89,7 @@ function CustomModel({ url }) {
 
   return (
     <Center ref={ref}>
-      <primitive object={scene} scale={2} position={[0, -0.2, 0]} />
+      <primitive object={clonedScene} scale={2} position={[0, -0.2, 0]} />
     </Center>
   );
 }
@@ -139,6 +165,25 @@ function LoadingFallback3D() {
   );
 }
 
+class ErrorBoundary3D extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error) {
+    console.warn("3D Model load failure, falling back to procedural shape:", error);
+  }
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback || null;
+    }
+    return this.props.children;
+  }
+}
+
 function Viewer3D({ shape, modelUrl }) {
   return (
     <div className="h-[260px] w-full overflow-hidden rounded-2xl border border-white/10 bg-black/30">
@@ -146,13 +191,15 @@ function Viewer3D({ shape, modelUrl }) {
         <color attach="background" args={["#08090d"]} />
         <ambientLight intensity={1.2} />
         <directionalLight position={[3, 4, 4]} intensity={2} />
-        <Suspense fallback={<LoadingFallback3D />}>
-          <Float speed={1.5} rotationIntensity={0.3} floatIntensity={0.4}>
-            {modelUrl ? <CustomModel url={modelUrl} /> : <SpinningForm variant={shape} />}
-          </Float>
-          <Environment preset="city" />
-          <ContactShadows position={[0, -1.7, 0]} opacity={0.45} scale={8} blur={2.5} far={3.5} />
-        </Suspense>
+        <ErrorBoundary3D fallback={<SpinningForm variant={shape || "rings"} />}>
+          <Suspense fallback={<LoadingFallback3D />}>
+            <Float speed={1.5} rotationIntensity={0.3} floatIntensity={0.4}>
+              {modelUrl ? <CustomModel url={modelUrl} /> : <SpinningForm variant={shape} />}
+            </Float>
+            <Environment preset="city" />
+            <ContactShadows position={[0, -1.7, 0]} opacity={0.45} scale={8} blur={2.5} far={3.5} />
+          </Suspense>
+        </ErrorBoundary3D>
         <OrbitControls enablePan={false} minDistance={3.5} maxDistance={7} />
       </Canvas>
     </div>
@@ -354,8 +401,21 @@ function UploadPanel({ onUpload }) {
 }
 
 function CreationFlowDialog({ image, onCancel, onComplete }) {
-  const [step, setStep] = useState("ask"); // "ask", "uploading", "meshy", "done"
+  const [step, setStep] = useState("ask"); // "ask", "key_prompt", "uploading", "meshy", "done", "error"
   const [log, setLog] = useState("");
+  const [progress, setProgress] = useState(0);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [apiKeyInput, setApiKeyInput] = useState(getMeshyApiKey());
+  const [rememberKey, setRememberKey] = useState(true);
+  const abortControllerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   const handleModelUpload = (event) => {
     const file = event.target.files?.[0];
@@ -364,26 +424,81 @@ function CreationFlowDialog({ image, onCancel, onComplete }) {
     onComplete(url);
   };
 
-  const startMeshyAPI = async () => {
-    setStep("meshy");
-    const steps = [
-      "Authenticating with Meshy API...",
-      "Analyzing sketch contours...",
-      "Generating 3D voxel representation...",
-      "Extracting mesh and interpolating surfaces...",
-      "Applying base textures and finalizing GLB..."
-    ];
-    for (const msg of steps) {
-      setLog(msg);
-      await new Promise(r => setTimeout(r, 1200));
+  const handleStartMeshy = () => {
+    const key = getMeshyApiKey();
+    if (key) {
+      executeMeshyAPI(key);
+    } else {
+      setStep("key_prompt");
     }
-    setStep("done");
-    setTimeout(() => {
-      // Return null to signify Meshy finished but we don't have a real payload.
-      // The App will fallback to a generated aesthetic primitive for demo purposes.
-      onComplete(null);
-    }, 1200);
   };
+
+  const executeMeshyAPI = async (keyToUse) => {
+    const trimmedKey = (keyToUse || "").trim();
+    if (trimmedKey && rememberKey) {
+      saveMeshyApiKey(trimmedKey);
+    }
+    setStep("meshy");
+    setProgress(5);
+    setLog("Submitting drawing to Meshy API...");
+    setErrorMsg("");
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const result = await generate3DFromImage({
+        image,
+        apiKey: trimmedKey,
+        signal: controller.signal,
+        onProgress: ({ progress: p, message }) => {
+          setProgress(p);
+          setLog(message);
+        },
+      });
+
+      setStep("done");
+      setTimeout(() => {
+        onComplete(result.glbUrl);
+      }, 1200);
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      console.error("Meshy error:", err);
+      setErrorMsg(err.message || "An unexpected error occurred during generation.");
+      setStep("error");
+    }
+  };
+
+  const executeDemoSimulation = async () => {
+    setStep("meshy");
+    setProgress(10);
+    setLog("Starting demo simulation...");
+    setErrorMsg("");
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const result = await simulateMeshyGeneration({
+        signal: controller.signal,
+        onProgress: ({ progress: p, message }) => {
+          setProgress(p);
+          setLog(message);
+        },
+      });
+
+      setStep("done");
+      setTimeout(() => {
+        onComplete(result.glbUrl);
+      }, 1200);
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      setErrorMsg(err.message || "Simulation interrupted");
+      setStep("error");
+    }
+  };
+
+  const hasConfiguredKey = Boolean(getMeshyApiKey());
 
   return (
     <motion.div
@@ -405,7 +520,7 @@ function CreationFlowDialog({ image, onCancel, onComplete }) {
           </button>
         </div>
         
-        <div className="grid md:grid-cols-[1fr_1.5fr] min-h-[360px]">
+        <div className="grid md:grid-cols-[1fr_1.5fr] min-h-[380px]">
           <div className="border-r border-white/10 bg-white/[0.02] p-6 flex flex-col justify-center">
             <p className="mb-3 text-xs uppercase tracking-[0.2em] font-semibold text-white/45">Source Sketch</p>
             <div className="overflow-hidden rounded-xl border border-white/10 bg-black/40 shadow-inner">
@@ -413,7 +528,7 @@ function CreationFlowDialog({ image, onCancel, onComplete }) {
             </div>
           </div>
           
-          <div className="p-6 relative">
+          <div className="p-6 relative flex flex-col justify-center">
             <AnimatePresence mode="wait">
               {step === "ask" && (
                 <motion.div
@@ -423,14 +538,16 @@ function CreationFlowDialog({ image, onCancel, onComplete }) {
                   exit={{ opacity: 0, x: -10 }}
                   className="space-y-6 pt-2"
                 >
-                  <div className="mb-8">
+                  <div>
                     <h3 className="text-2xl font-medium tracking-tight text-white">Select a 3D Method</h3>
-                    <p className="mt-2 text-sm text-white/60 leading-relaxed">You have provided a drawing. The system requires a 3D model to complete the dual-view gallery pairing. How do you want to proceed?</p>
+                    <p className="mt-2 text-sm text-white/60 leading-relaxed">
+                      You have provided a drawing. The system requires a 3D model to complete the dual-view gallery pairing.
+                    </p>
                   </div>
 
                   <div className="grid gap-3">
                     <button
-                      onClick={startMeshyAPI}
+                      onClick={handleStartMeshy}
                       className="group flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/5 p-4 text-left transition hover:bg-white/10 hover:border-white/30"
                     >
                       <div className="flex items-center gap-4">
@@ -438,8 +555,17 @@ function CreationFlowDialog({ image, onCancel, onComplete }) {
                           <Sparkles className="h-5 w-5" />
                         </div>
                         <div>
-                          <div className="font-medium text-white text-base">Generate via Meshy API</div>
-                          <div className="text-sm text-white/50 mt-0.5">Automatic Image-to-3D pipeline</div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-white text-base">Generate via Meshy AI</span>
+                            {hasConfiguredKey && (
+                              <span className="rounded-full bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
+                                Key Ready
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-sm text-white/50 mt-0.5">
+                            {hasConfiguredKey ? "Direct image-to-3D synthesis" : "Automatic Image-to-3D (Requires key)"}
+                          </div>
                         </div>
                       </div>
                       <ChevronRight className="h-5 w-5 text-white/30 group-hover:text-white/70" />
@@ -464,21 +590,86 @@ function CreationFlowDialog({ image, onCancel, onComplete }) {
                 </motion.div>
               )}
 
+              {step === "key_prompt" && (
+                <motion.div
+                  key="key_prompt"
+                  initial={{ opacity: 0, x: 10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -10 }}
+                  className="space-y-4"
+                >
+                  <button onClick={() => setStep("ask")} className="self-start text-xs text-white/50 hover:text-white transition flex items-center gap-1.5">
+                    ← Back to Methods
+                  </button>
+
+                  <div>
+                    <div className="flex items-center gap-2 text-blue-400 mb-1">
+                      <Key className="h-4 w-4" />
+                      <span className="text-xs font-semibold uppercase tracking-wider">Authentication</span>
+                    </div>
+                    <h3 className="text-xl font-medium tracking-tight text-white">Meshy API Key</h3>
+                    <p className="mt-1 text-xs text-white/50 leading-relaxed">
+                      Enter your API key below, or configure <code className="text-blue-300">VITE_MESHY_API_KEY</code> in <code className="text-blue-300">.env.local</code>.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <input
+                      type="password"
+                      value={apiKeyInput}
+                      onChange={(e) => setApiKeyInput(e.target.value)}
+                      placeholder="msy_..."
+                      className="w-full rounded-xl border border-white/15 bg-white/5 px-3.5 py-2.5 text-sm text-white placeholder-white/25 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <label className="flex items-center gap-2 cursor-pointer text-xs text-white/60">
+                      <input
+                        type="checkbox"
+                        checked={rememberKey}
+                        onChange={(e) => setRememberKey(e.target.checked)}
+                        className="rounded border-white/20 bg-white/10 text-blue-500 focus:ring-0"
+                      />
+                      Save to this browser session
+                    </label>
+                  </div>
+
+                  <div className="space-y-2 pt-1">
+                    <button
+                      onClick={() => executeMeshyAPI(apiKeyInput)}
+                      disabled={!apiKeyInput.trim()}
+                      className="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Generate 3D Model
+                    </button>
+                    
+                    <button
+                      onClick={executeDemoSimulation}
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-white/70 transition hover:bg-white/10 hover:text-white"
+                    >
+                      Or Test with Simulated Demo Primitive
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+
               {step === "uploading" && (
                 <motion.div
                   key="uploading"
                   initial={{ opacity: 0, x: 10 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -10 }}
-                  className="space-y-5 flex flex-col h-full justify-center pb-8"
+                  className="space-y-5 flex flex-col h-full justify-center pb-4"
                 >
-                  <button onClick={() => setStep("ask")} className="self-start mb-2 px-3 py-1 -ml-3 rounded-md text-sm text-white/50 hover:text-white hover:bg-white/5 transition flex items-center gap-2">← Change Method</button>
+                  <button onClick={() => setStep("ask")} className="self-start px-2 py-1 -ml-2 rounded-md text-xs text-white/50 hover:text-white hover:bg-white/5 transition flex items-center gap-1.5">
+                    ← Change Method
+                  </button>
                   <div>
                     <h3 className="text-xl font-medium tracking-tight text-white">Upload Associated Model</h3>
-                    <p className="mt-1.5 text-sm text-white/50 leading-relaxed">Select the .glb or .gltf file you created from this sketch using an external tool (Blender, Nomad, etc).</p>
+                    <p className="mt-1.5 text-xs text-white/50 leading-relaxed">
+                      Select the .glb or .gltf file you created from this sketch using an external tool (Blender, Nomad, etc).
+                    </p>
                   </div>
-                  <label className="flex cursor-pointer flex-col flex-1 min-h-[140px] items-center justify-center rounded-2xl border-2 border-dashed border-white/20 bg-white/[0.02] transition hover:bg-white/[0.05] hover:border-white/40">
-                    <Upload className="mb-3 h-8 w-8 text-white/40" />
+                  <label className="flex cursor-pointer flex-col flex-1 min-h-[130px] items-center justify-center rounded-2xl border-2 border-dashed border-white/20 bg-white/[0.02] transition hover:bg-white/[0.05] hover:border-white/40">
+                    <Upload className="mb-2 h-7 w-7 text-white/40" />
                     <span className="text-sm font-medium text-white/80">Browse for file</span>
                     <span className="mt-1 text-xs text-white/30">GLB, GLTF up to 50MB</span>
                     <input type="file" accept=".glb,.gltf" className="hidden" onChange={handleModelUpload} />
@@ -492,26 +683,93 @@ function CreationFlowDialog({ image, onCancel, onComplete }) {
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 1.05 }}
-                  className="absolute inset-0 flex h-full flex-col items-center justify-center text-center space-y-8 py-8"
+                  className="flex flex-col items-center justify-center text-center space-y-6 py-6"
                 >
-                  <div className="relative flex h-20 w-20 items-center justify-center rounded-full bg-blue-500/10 border border-blue-500/20 shadow-[0_0_40px_rgba(59,130,246,0.1)]">
+                  <div className="relative flex h-20 w-20 items-center justify-center rounded-full bg-blue-500/10 border border-blue-500/20 shadow-[0_0_40px_rgba(59,130,246,0.15)]">
                     <Loader2 className="h-10 w-10 animate-spin text-blue-400" />
+                    <span className="absolute text-[11px] font-mono font-bold text-blue-300">
+                      {progress}%
+                    </span>
                   </div>
-                  <div className="w-full max-w-[80%]">
-                    <div className="text-lg font-medium text-white mb-2">Meshy API Processing</div>
+
+                  <div className="w-full max-w-[88%] space-y-3">
+                    <div className="text-lg font-medium text-white">Meshy AI Generation</div>
+                    
+                    {/* Progress Bar */}
+                    <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+                      <motion.div
+                        className="h-full bg-gradient-to-r from-blue-500 to-indigo-400"
+                        initial={{ width: "5%" }}
+                        animate={{ width: `${progress}%` }}
+                        transition={{ duration: 0.4 }}
+                      />
+                    </div>
+
                     <div className="h-6 overflow-hidden">
                       <AnimatePresence mode="popLayout">
                         <motion.div
                           key={log}
-                          initial={{ opacity: 0, y: 15 }}
+                          initial={{ opacity: 0, y: 12 }}
                           animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -15 }}
-                          className="text-sm text-blue-300/80"
+                          exit={{ opacity: 0, y: -12 }}
+                          className="text-xs text-blue-300/80 font-medium"
                         >
                           {log}
                         </motion.div>
                       </AnimatePresence>
                     </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      abortControllerRef.current?.abort();
+                      setStep("ask");
+                    }}
+                    className="text-xs text-white/40 hover:text-white transition underline underline-offset-4"
+                  >
+                    Cancel Task
+                  </button>
+                </motion.div>
+              )}
+
+              {step === "error" && (
+                <motion.div
+                  key="error"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 1.05 }}
+                  className="space-y-4 text-center py-4"
+                >
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-500/10 border border-red-500/25 text-red-400">
+                    <AlertCircle className="h-7 w-7" />
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-medium text-white">Generation Failed</h3>
+                    <p className="mt-1.5 text-xs text-red-300/80 max-h-24 overflow-y-auto px-2 leading-relaxed">
+                      {errorMsg}
+                    </p>
+                  </div>
+
+                  <div className="space-y-2 pt-2">
+                    <button
+                      onClick={() => setStep("key_prompt")}
+                      className="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-medium text-white hover:bg-blue-500 transition"
+                    >
+                      Update Key & Retry
+                    </button>
+                    <button
+                      onClick={() => onComplete(null)}
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-white/80 hover:bg-white/10 transition"
+                    >
+                      Continue with Aesthetic Demo Model
+                    </button>
+                    <button
+                      onClick={() => setStep("ask")}
+                      className="text-xs text-white/40 hover:text-white transition"
+                    >
+                      Back to Selection
+                    </button>
                   </div>
                 </motion.div>
               )}
@@ -521,14 +779,14 @@ function CreationFlowDialog({ image, onCancel, onComplete }) {
                   key="done"
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="absolute inset-0 flex h-full flex-col items-center justify-center text-center space-y-5 py-12"
+                  className="flex h-full flex-col items-center justify-center text-center space-y-5 py-8"
                 >
                   <div className="flex h-20 w-20 items-center justify-center rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 shadow-[0_0_40px_rgba(16,185,129,0.15)]">
                     <CheckCircle2 className="h-10 w-10" />
                   </div>
                   <div>
                     <div className="text-xl font-medium tracking-tight text-white">Generation Complete!</div>
-                    <div className="text-sm text-emerald-300/70 mt-1">Finalizing gallery entry...</div>
+                    <div className="text-sm text-emerald-300/70 mt-1">Finalizing paired gallery work...</div>
                   </div>
                 </motion.div>
               )}
@@ -539,6 +797,7 @@ function CreationFlowDialog({ image, onCancel, onComplete }) {
     </motion.div>
   );
 }
+
 
 function ManifestoDialog({ onClose }) {
   return (

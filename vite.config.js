@@ -5,4 +5,19 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   assetsInclude: ['**/*.glb', '**/*.gltf'],
+  server: {
+    port: 22222,
+    proxy: {
+      '/meshy-assets': {
+        target: 'https://assets.meshy.ai',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/meshy-assets/, ''),
+      },
+      '/api/meshy': {
+        target: 'https://api.meshy.ai',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/meshy/, ''),
+      },
+    },
+  },
 })
