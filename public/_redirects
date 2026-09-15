@@ -1,3 +1,5 @@
+/meshy-assets/* https://assets.meshy.ai/:splat 200!
 /api/meshy-assets/* https://assets.meshy.ai/:splat 200!
 /api/meshy/* https://api.meshy.ai/:splat 200!
 /* /index.html 200
+

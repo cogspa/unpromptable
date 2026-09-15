@@ -13,6 +13,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/meshy-assets/, ''),
       },
+      '/api/meshy-assets': {
+        target: 'https://assets.meshy.ai',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/meshy-assets/, ''),
+      },
       '/api/meshy': {
         target: 'https://api.meshy.ai',
         changeOrigin: true,

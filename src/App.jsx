@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState, useEffect, Suspense } from "react";
+import React, { useCallback, useMemo, useRef, useState, useEffect, Suspense } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Float, Environment, ContactShadows, useGLTF, Center } from "@react-three/drei";
 import { motion, AnimatePresence } from "framer-motion";
@@ -67,6 +67,45 @@ const starterWorks = [
   },
 ];
 
+const WORKS_STORAGE_KEY = "unpromptable_works_v1";
+
+export function loadStoredWorks() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(WORKS_STORAGE_KEY) || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((w) => {
+      // If blob: URL died with the page session, fall back to rawModelUrl via proxy
+      if (typeof w.modelUrl === "string" && w.modelUrl.startsWith("blob:")) {
+        const fallback = w.rawModelUrl ? resolveModelUrl(w.rawModelUrl) : null;
+        return { ...w, modelUrl: fallback, modelLost: !fallback };
+      }
+      return w;
+    });
+  } catch (e) {
+    console.warn("Could not restore saved works:", e);
+    return [];
+  }
+}
+
+export function persistWorks(works) {
+  const custom = works.filter((w) => w.custom);
+  try {
+    localStorage.setItem(WORKS_STORAGE_KEY, JSON.stringify(custom));
+  } catch (e) {
+    // Sketches are full-res data URLs, so hitting quota is realistic.
+    // Drop the oldest entries until it fits rather than losing everything.
+    for (let i = custom.length - 1; i > 0; i--) {
+      try {
+        localStorage.setItem(WORKS_STORAGE_KEY, JSON.stringify(custom.slice(0, i)));
+        return;
+      } catch (_) {
+        /* keep trimming */
+      }
+    }
+    console.warn("Could not persist works:", e);
+  }
+}
+
 export function resolveModelUrl(url) {
   if (!url || typeof url !== "string") return url;
   if (url.startsWith("https://assets.meshy.ai")) {
@@ -75,11 +114,16 @@ export function resolveModelUrl(url) {
   return url;
 }
 
-function CustomModel({ url }) {
+function CustomModel({ url, onReady }) {
   const resolvedUrl = useMemo(() => resolveModelUrl(url), [url]);
   const { scene } = useGLTF(resolvedUrl);
   const clonedScene = useMemo(() => scene.clone(true), [scene]);
   const ref = useRef();
+
+  // Suspense has resolved by the time this runs, so the DOM overlay can clear.
+  useEffect(() => {
+    onReady?.();
+  }, [clonedScene, onReady]);
   
   useFrame((_, delta) => {
     if (ref.current) {
@@ -159,8 +203,9 @@ function LoadingFallback3D() {
   });
   return (
     <mesh ref={ref}>
-      <octahedronGeometry args={[0.5, 0]} />
-      <meshStandardMaterial color="#F2C029" wireframe opacity={0.6} transparent />
+      <octahedronGeometry args={[0.9, 0]} />
+      {/* Basic (unlit) so it is visible with or without an environment map. */}
+      <meshBasicMaterial color="#F2C029" wireframe />
     </mesh>
   );
 }
@@ -175,6 +220,7 @@ class ErrorBoundary3D extends React.Component {
   }
   componentDidCatch(error) {
     console.warn("3D Model load failure, falling back to procedural shape:", error);
+    this.props.onError?.(error);
   }
   render() {
     if (this.state.hasError) {
@@ -184,24 +230,84 @@ class ErrorBoundary3D extends React.Component {
   }
 }
 
-function Viewer3D({ shape, modelUrl }) {
+function Viewer3D({ shape, modelUrl, modelLost }) {
+  const [status, setStatus] = useState(modelUrl ? "loading" : "ready");
+  const [errorText, setErrorText] = useState("");
+
+  // A new source means a fresh load; also resets a boundary stuck in its error state.
+  useEffect(() => {
+    setStatus(modelUrl ? "loading" : "ready");
+    setErrorText("");
+  }, [modelUrl]);
+
+  const handleReady = useCallback(() => setStatus("ready"), []);
+  const handleError = useCallback((err) => {
+    setStatus("error");
+    setErrorText(err?.message || "");
+  }, []);
+
   return (
-    <div className="h-[260px] w-full overflow-hidden rounded-2xl border border-white/10 bg-black/30">
+    <div className="relative h-[260px] w-full overflow-hidden rounded-2xl border border-white/10 bg-black/30">
       <Canvas camera={{ position: [0, 0, 4.8], fov: 45 }}>
         <color attach="background" args={["#08090d"]} />
         <ambientLight intensity={1.2} />
         <directionalLight position={[3, 4, 4]} intensity={2} />
-        <ErrorBoundary3D fallback={<SpinningForm variant={shape || "rings"} />}>
-          <Suspense fallback={<LoadingFallback3D />}>
-            <Float speed={1.5} rotationIntensity={0.3} floatIntensity={0.4}>
-              {modelUrl ? <CustomModel url={modelUrl} /> : <SpinningForm variant={shape} />}
-            </Float>
+
+        {/* Environment lives OUTSIDE the model boundary on purpose: SpinningForm
+            uses highly metallic materials, and metal with no image-based lighting
+            renders essentially black — i.e. the "fallback" looked like an empty
+            viewport. Keeping the env map alive means the fallback is actually visible. */}
+        <ErrorBoundary3D fallback={null}>
+          <Suspense fallback={null}>
             <Environment preset="city" />
-            <ContactShadows position={[0, -1.7, 0]} opacity={0.45} scale={8} blur={2.5} far={3.5} />
           </Suspense>
         </ErrorBoundary3D>
+        <ContactShadows position={[0, -1.7, 0]} opacity={0.45} scale={8} blur={2.5} far={3.5} />
+
+        <ErrorBoundary3D
+          key={modelUrl || `procedural-${shape}`}
+          onError={handleError}
+          fallback={<SpinningForm variant={shape || "rings"} />}
+        >
+          <Suspense fallback={<LoadingFallback3D />}>
+            <Float speed={1.5} rotationIntensity={0.3} floatIntensity={0.4}>
+              {modelUrl ? (
+                <CustomModel url={modelUrl} onReady={handleReady} />
+              ) : (
+                <SpinningForm variant={shape} />
+              )}
+            </Float>
+          </Suspense>
+        </ErrorBoundary3D>
+
         <OrbitControls enablePan={false} minDistance={3.5} maxDistance={7} />
       </Canvas>
+
+      {status === "loading" && (
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/45 backdrop-blur-[1px]">
+          <Loader2 className="h-5 w-5 animate-spin text-gold" />
+          <p className="text-[11px] uppercase tracking-[0.25em] text-white/70">Streaming 3D model</p>
+        </div>
+      )}
+
+      {status === "error" && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-start gap-2 bg-black/75 px-3 py-2">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber" />
+          <p className="text-[11px] leading-4 text-white/70">
+            Model unavailable &mdash; showing a procedural stand-in.
+            {errorText ? ` (${errorText})` : " Meshy asset links are signed and expire."}
+          </p>
+        </div>
+      )}
+
+      {modelLost && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-start gap-2 bg-black/75 px-3 py-2">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber" />
+          <p className="text-[11px] leading-4 text-white/70">
+            This model was a local upload &mdash; re-upload the file to view it again.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -255,7 +361,7 @@ function GalleryCard({ work }) {
               <Eye className="h-3.5 w-3.5" /> Interactive
             </span>
           </div>
-          <Viewer3D shape={work.shape} modelUrl={work.modelUrl} />
+          <Viewer3D shape={work.shape} modelUrl={work.modelUrl} modelLost={work.modelLost} />
           <div className="flex flex-wrap gap-2 text-xs text-white/60">
             <button className="rounded-full border border-white/10 px-3 py-2 transition hover:bg-white/10">View Detail</button>
             <button className="rounded-full border border-white/10 px-3 py-2 transition hover:bg-white/10">Share</button>
@@ -459,7 +565,7 @@ function CreationFlowDialog({ image, onCancel, onComplete }) {
 
       setStep("done");
       setTimeout(() => {
-        onComplete(result.glbUrl);
+        onComplete(result.glbUrl, result.rawUrl);
       }, 1200);
     } catch (err) {
       if (controller.signal.aborted) return;
@@ -847,7 +953,7 @@ function ManifestoDialog({ onClose }) {
 
 
 export default function App() {
-  const [works, setWorks] = useState(starterWorks);
+  const [works, setWorks] = useState(() => [...loadStoredWorks(), ...starterWorks]);
   const [showDrawer, setShowDrawer] = useState(false);
   const [showManifesto, setShowManifesto] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState("All");
@@ -855,6 +961,11 @@ export default function App() {
   
   // Creation Flow State
   const [pendingImage, setPendingImage] = useState(null);
+
+  // Persist user-generated works so a reload does not lose them
+  useEffect(() => {
+    persistWorks(works);
+  }, [works]);
 
   // Dismiss loading screen after a short delay to let assets start streaming
   useEffect(() => {
@@ -874,7 +985,7 @@ export default function App() {
     setPendingImage(image);
   };
 
-  const finalizeCreation = (modelUrl) => {
+  const finalizeCreation = (modelUrl, rawModelUrl) => {
     const shapes = ["spikes", "rings", "stack"];
     const accents = [
       "from-gold/20 to-sage/20",
@@ -885,13 +996,16 @@ export default function App() {
     setWorks((prev) => [
       {
         id: Date.now(),
+        custom: true,
+        createdAt: new Date().toISOString(),
         title: `Untitled Form ${prev.length + 1}`,
         artist: "You",
-        tags: ["new", "unpromptable", modelUrl ? "custom-upload" : "meshy-api"],
+        tags: ["new", "unpromptable", "meshy-api"],
         visibility: "Private",
         image: pendingImage,
         shape: shapes[prev.length % shapes.length], // Fallback if no custom URL
         modelUrl: modelUrl,
+        rawModelUrl: rawModelUrl || modelUrl,
         accent: accents[prev.length % accents.length],
       },
       ...prev,

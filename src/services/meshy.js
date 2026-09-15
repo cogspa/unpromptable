@@ -149,16 +149,34 @@ export async function generate3DFromImage({
     });
 
     if (task.status === "SUCCEEDED") {
-      let glbUrl = task.model_urls?.glb || task.model_url;
-      if (!glbUrl) {
+      let rawGlbUrl = task.model_urls?.glb || task.model_url;
+      if (!rawGlbUrl) {
         throw new Error("Task succeeded but no GLB model URL was returned.");
       }
-      // Route through local /meshy-assets proxy to bypass CloudFront CORS restrictions
-      if (typeof glbUrl === "string" && glbUrl.startsWith("https://assets.meshy.ai")) {
-        glbUrl = glbUrl.replace("https://assets.meshy.ai", "/meshy-assets");
+
+      const proxiedUrl = rawGlbUrl.startsWith("https://assets.meshy.ai")
+        ? rawGlbUrl.replace("https://assets.meshy.ai", "/meshy-assets")
+        : rawGlbUrl;
+
+      // In the browser, convert the GLB into a local in-memory Object URL (Blob).
+      // This completely eliminates CORS issues, network latency during rendering,
+      // and guarantees Three.js useGLTF loads the actual binary mesh immediately!
+      let finalModelUrl = proxiedUrl;
+      try {
+        const res = await fetch(proxiedUrl);
+        if (res.ok) {
+          const blob = await res.blob();
+          if (blob.size > 1000) {
+            finalModelUrl = URL.createObjectURL(blob);
+          }
+        }
+      } catch (err) {
+        console.warn("Could not create local blob URL from proxied GLB, falling back to proxied URL:", err);
       }
+
       return {
-        glbUrl,
+        glbUrl: finalModelUrl,
+        rawUrl: rawGlbUrl,
         thumbnailUrl: task.thumbnail_url,
         task,
       };
