@@ -40,7 +40,7 @@ function getStatusMessage(status, progress = 0) {
     if (progress < 25) return `Analyzing contours & depth... (${progress}%)`;
     if (progress < 50) return `Generating voxel geometry... (${progress}%)`;
     if (progress < 75) return `Reconstructing surfaces... (${progress}%)`;
-    return `Synthesizing PBR textures & GLB... (${progress}%)`;
+    return `Painting textures & PBR maps... (${progress}%)`;
   }
   switch (status) {
     case "PENDING":
@@ -59,11 +59,15 @@ function getStatusMessage(status, progress = 0) {
 /**
  * Generate a 3D model from an image data URL or public URL via Meshy API
  */
+export const DEFAULT_TEXTURE_PROMPT =
+  "richly coloured creature skin, subsurface detail, painterly matte finish";
+
 export async function generate3DFromImage({
   image,
   apiKey,
   onProgress,
   signal,
+  texturePrompt,
 }) {
   const token = (apiKey || getMeshyApiKey()).trim();
   if (!token) {
@@ -87,6 +91,11 @@ export async function generate3DFromImage({
     },
     body: JSON.stringify({
       image_url: image,
+      // should_texture defaults to true, so the texture stage already runs.
+      // A line drawing carries no colour, though, so without texture_prompt
+      // Meshy returns a near-greyscale base colour map.
+      should_texture: true,
+      texture_prompt: (texturePrompt || DEFAULT_TEXTURE_PROMPT).slice(0, 800),
       enable_pbr: true,
       should_remesh: false,
     }),
@@ -149,35 +158,21 @@ export async function generate3DFromImage({
     });
 
     if (task.status === "SUCCEEDED") {
-      let rawGlbUrl = task.model_urls?.glb || task.model_url;
-      if (!rawGlbUrl) {
+      if (!task.texture_urls?.length) {
+        console.warn("Meshy task succeeded without texture maps:", task.id);
+      }
+      let glbUrl = task.model_urls?.glb || task.model_url;
+      if (!glbUrl) {
         throw new Error("Task succeeded but no GLB model URL was returned.");
       }
-
-      const proxiedUrl = rawGlbUrl.startsWith("https://assets.meshy.ai")
-        ? rawGlbUrl.replace("https://assets.meshy.ai", "/meshy-assets")
-        : rawGlbUrl;
-
-      // In the browser, convert the GLB into a local in-memory Object URL (Blob).
-      // This completely eliminates CORS issues, network latency during rendering,
-      // and guarantees Three.js useGLTF loads the actual binary mesh immediately!
-      let finalModelUrl = proxiedUrl;
-      try {
-        const res = await fetch(proxiedUrl);
-        if (res.ok) {
-          const blob = await res.blob();
-          if (blob.size > 1000) {
-            finalModelUrl = URL.createObjectURL(blob);
-          }
-        }
-      } catch (err) {
-        console.warn("Could not create local blob URL from proxied GLB, falling back to proxied URL:", err);
+      // Route through local /meshy-assets proxy to bypass CloudFront CORS restrictions
+      if (typeof glbUrl === "string" && glbUrl.startsWith("https://assets.meshy.ai")) {
+        glbUrl = glbUrl.replace("https://assets.meshy.ai", "/meshy-assets");
       }
-
       return {
-        glbUrl: finalModelUrl,
-        rawUrl: rawGlbUrl,
+        glbUrl,
         thumbnailUrl: task.thumbnail_url,
+        textured: Boolean(task.texture_urls?.length),
         task,
       };
     }

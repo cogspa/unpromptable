@@ -3,7 +3,8 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Float, Environment, ContactShadows, useGLTF, Center } from "@react-three/drei";
 import { motion, AnimatePresence } from "framer-motion";
 import { Upload, PencilLine, Sparkles, Eye, Lock, Globe, RotateCcw, Eraser, Download, Box, Loader2, CheckCircle2, ChevronRight, X, Key, AlertCircle } from "lucide-react";
-import { getMeshyApiKey, saveMeshyApiKey, generate3DFromImage, simulateMeshyGeneration } from "./services/meshy";
+import { getMeshyApiKey, saveMeshyApiKey, generate3DFromImage, simulateMeshyGeneration, DEFAULT_TEXTURE_PROMPT } from "./services/meshy";
+import DrawingCanvas from "./components/DrawingCanvas";
 import thromper2DImage from "./assets/thromper2D.png";
 import thromper3DUrl from "./assets/Thromper3D.glb";
 import piscador2DImage from "./assets/piscador2D.png";
@@ -73,14 +74,12 @@ export function loadStoredWorks() {
   try {
     const parsed = JSON.parse(localStorage.getItem(WORKS_STORAGE_KEY) || "[]");
     if (!Array.isArray(parsed)) return [];
-    return parsed.map((w) => {
-      // If blob: URL died with the page session, fall back to rawModelUrl via proxy
-      if (typeof w.modelUrl === "string" && w.modelUrl.startsWith("blob:")) {
-        const fallback = w.rawModelUrl ? resolveModelUrl(w.rawModelUrl) : null;
-        return { ...w, modelUrl: fallback, modelLost: !fallback };
-      }
-      return w;
-    });
+    return parsed.map((w) =>
+      // blob: URLs die with the page session, so flag them instead of 404ing.
+      typeof w.modelUrl === "string" && w.modelUrl.startsWith("blob:")
+        ? { ...w, modelUrl: null, modelLost: true }
+        : w
+    );
   } catch (e) {
     console.warn("Could not restore saved works:", e);
     return [];
@@ -230,7 +229,32 @@ class ErrorBoundary3D extends React.Component {
   }
 }
 
-function Viewer3D({ shape, modelUrl, modelLost }) {
+/**
+ * Each gallery card runs its own WebGL render loop. Off-screen cards were still
+ * rendering every frame, so four of them competed with the drawing canvas for
+ * the same main thread. This parks a card's loop until it is actually visible.
+ */
+function useInViewport(ref, rootMargin = "200px") {
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      setInView(true); // no observer: never leave the canvas permanently frozen
+      return undefined;
+    }
+    const obs = new IntersectionObserver(
+      ([entry]) => setInView(entry.isIntersecting),
+      { rootMargin }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [ref, rootMargin]);
+  return inView;
+}
+
+function Viewer3D({ shape, modelUrl, modelLost, paused = false }) {
+  const hostRef = useRef(null);
+  const inView = useInViewport(hostRef);
   const [status, setStatus] = useState(modelUrl ? "loading" : "ready");
   const [errorText, setErrorText] = useState("");
 
@@ -247,8 +271,15 @@ function Viewer3D({ shape, modelUrl, modelLost }) {
   }, []);
 
   return (
-    <div className="relative h-[260px] w-full overflow-hidden rounded-2xl border border-white/10 bg-black/30">
-      <Canvas camera={{ position: [0, 0, 4.8], fov: 45 }}>
+    <div
+      ref={hostRef}
+      className="relative h-[260px] w-full overflow-hidden rounded-2xl border border-white/10 bg-black/30"
+    >
+      <Canvas
+        camera={{ position: [0, 0, 4.8], fov: 45 }}
+        frameloop={inView && !paused ? "always" : "never"}
+        dpr={[1, 1.75]}
+      >
         <color attach="background" args={["#08090d"]} />
         <ambientLight intensity={1.2} />
         <directionalLight position={[3, 4, 4]} intensity={2} />
@@ -312,7 +343,7 @@ function Viewer3D({ shape, modelUrl, modelLost }) {
   );
 }
 
-function GalleryCard({ work }) {
+function GalleryCard({ work, paused = false }) {
   return (
     <motion.div
       layout
@@ -361,7 +392,7 @@ function GalleryCard({ work }) {
               <Eye className="h-3.5 w-3.5" /> Interactive
             </span>
           </div>
-          <Viewer3D shape={work.shape} modelUrl={work.modelUrl} modelLost={work.modelLost} />
+          <Viewer3D shape={work.shape} modelUrl={work.modelUrl} modelLost={work.modelLost} paused={paused} />
           <div className="flex flex-wrap gap-2 text-xs text-white/60">
             <button className="rounded-full border border-white/10 px-3 py-2 transition hover:bg-white/10">View Detail</button>
             <button className="rounded-full border border-white/10 px-3 py-2 transition hover:bg-white/10">Share</button>
@@ -370,110 +401,6 @@ function GalleryCard({ work }) {
         </div>
       </div>
     </motion.div>
-  );
-}
-
-function DrawingCanvas({ onExport }) {
-  const canvasRef = useRef(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [brushSize, setBrushSize] = useState(4);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = "#111111";
-  }, []);
-
-  const getPos = (e) => {
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    return {
-      x: ((clientX - rect.left) / rect.width) * canvas.width,
-      y: ((clientY - rect.top) / rect.height) * canvas.height,
-    };
-  };
-
-  const startDrawing = (e) => {
-    e.preventDefault();
-    const ctx = canvasRef.current.getContext("2d");
-    const { x, y } = getPos(e);
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineWidth = brushSize;
-    setIsDrawing(true);
-  };
-
-  const draw = (e) => {
-    if (!isDrawing) return;
-    e.preventDefault();
-    const ctx = canvasRef.current.getContext("2d");
-    const { x, y } = getPos(e);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-  };
-
-  const stopDrawing = () => setIsDrawing(false);
-
-  const clearCanvas = () => {
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-  };
-
-  return (
-    <div className="space-y-4 rounded-[28px] border border-white/10 bg-white/5 p-4 backdrop-blur">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-xl font-semibold text-white">Draw directly on Unpromptable</h3>
-          <p className="text-sm text-white/60">Sketch an impossible form, then send it to the 3D pipeline.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-2 text-sm text-white/70">
-            Brush
-            <input
-              type="range"
-              min="1"
-              max="18"
-              value={brushSize}
-              onChange={(e) => setBrushSize(Number(e.target.value))}
-            />
-          </label>
-          <button onClick={clearCanvas} className="inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-2 text-sm text-white/80 transition hover:bg-white/10">
-            <Eraser className="h-4 w-4" /> Clear
-          </button>
-          <button
-            onClick={() => onExport(canvasRef.current.toDataURL("image/png"))}
-            className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-medium text-black transition hover:opacity-90"
-          >
-            <Sparkles className="h-4 w-4" /> Generate from Sketch
-          </button>
-        </div>
-      </div>
-
-      <div className="overflow-hidden rounded-2xl border border-white/10 bg-white">
-        <canvas
-          ref={canvasRef}
-          width={1200}
-          height={700}
-          className="h-[420px] w-full cursor-crosshair touch-none"
-          onMouseDown={startDrawing}
-          onMouseMove={draw}
-          onMouseUp={stopDrawing}
-          onMouseLeave={stopDrawing}
-          onTouchStart={startDrawing}
-          onTouchMove={draw}
-          onTouchEnd={stopDrawing}
-        />
-      </div>
-      <p className="text-xs text-white/45">Sketch natively, then proceed to the API configuration or manual upload step.</p>
-    </div>
   );
 }
 
@@ -513,6 +440,7 @@ function CreationFlowDialog({ image, onCancel, onComplete }) {
   const [errorMsg, setErrorMsg] = useState("");
   const [apiKeyInput, setApiKeyInput] = useState(getMeshyApiKey());
   const [rememberKey, setRememberKey] = useState(true);
+  const [texturePrompt, setTexturePrompt] = useState(DEFAULT_TEXTURE_PROMPT);
   const abortControllerRef = useRef(null);
 
   useEffect(() => {
@@ -556,6 +484,7 @@ function CreationFlowDialog({ image, onCancel, onComplete }) {
       const result = await generate3DFromImage({
         image,
         apiKey: trimmedKey,
+        texturePrompt,
         signal: controller.signal,
         onProgress: ({ progress: p, message }) => {
           setProgress(p);
@@ -565,7 +494,7 @@ function CreationFlowDialog({ image, onCancel, onComplete }) {
 
       setStep("done");
       setTimeout(() => {
-        onComplete(result.glbUrl, result.rawUrl);
+        onComplete(result.glbUrl);
       }, 1200);
     } catch (err) {
       if (controller.signal.aborted) return;
@@ -648,6 +577,24 @@ function CreationFlowDialog({ image, onCancel, onComplete }) {
                     <h3 className="text-2xl font-medium tracking-tight text-white">Select a 3D Method</h3>
                     <p className="mt-2 text-sm text-white/60 leading-relaxed">
                       You have provided a drawing. The system requires a 3D model to complete the dual-view gallery pairing.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+                      Texture Direction
+                    </label>
+                    <textarea
+                      value={texturePrompt}
+                      onChange={(e) => setTexturePrompt(e.target.value.slice(0, 800))}
+                      rows={2}
+                      placeholder="e.g. mottled green reptile hide, wet gloss, amber eyes"
+                      className="w-full resize-none rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-white/30 outline-none transition focus:border-white/30"
+                    />
+                    <p className="mt-1.5 text-[11px] leading-4 text-white/40">
+                      A line drawing carries no colour, so without direction Meshy returns a grey model.
+                      {" "}
+                      {texturePrompt.length}/800
                     </p>
                   </div>
 
@@ -955,6 +902,15 @@ function ManifestoDialog({ onClose }) {
 export default function App() {
   const [works, setWorks] = useState(() => [...loadStoredWorks(), ...starterWorks]);
   const [showDrawer, setShowDrawer] = useState(false);
+  const backgroundVideoRef = useRef(null);
+
+  // Give drawing priority over decorative video decoding and compositing.
+  useEffect(() => {
+    const video = backgroundVideoRef.current;
+    if (!video) return;
+    if (showDrawer) video.pause();
+    else video.play().catch(() => {}); // autoplay may be blocked by the browser
+  }, [showDrawer]);
   const [showManifesto, setShowManifesto] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState("All");
   const [isLoading, setIsLoading] = useState(true);
@@ -985,7 +941,7 @@ export default function App() {
     setPendingImage(image);
   };
 
-  const finalizeCreation = (modelUrl, rawModelUrl) => {
+  const finalizeCreation = (modelUrl) => {
     const shapes = ["spikes", "rings", "stack"];
     const accents = [
       "from-gold/20 to-sage/20",
@@ -1000,12 +956,11 @@ export default function App() {
         createdAt: new Date().toISOString(),
         title: `Untitled Form ${prev.length + 1}`,
         artist: "You",
-        tags: ["new", "unpromptable", "meshy-api"],
+        tags: ["new", "unpromptable", modelUrl ? "custom-upload" : "meshy-api"],
         visibility: "Private",
         image: pendingImage,
         shape: shapes[prev.length % shapes.length], // Fallback if no custom URL
         modelUrl: modelUrl,
-        rawModelUrl: rawModelUrl || modelUrl,
         accent: accents[prev.length % accents.length],
       },
       ...prev,
@@ -1046,7 +1001,7 @@ export default function App() {
 
       {/* Background Video */}
       <video
-        autoPlay
+        ref={backgroundVideoRef}
         loop
         muted
         playsInline
@@ -1150,7 +1105,7 @@ export default function App() {
           <div className="grid gap-6">
             <AnimatePresence>
               {filteredWorks.map((work) => (
-                <GalleryCard key={work.id} work={work} />
+                <GalleryCard key={work.id} work={work} paused={showDrawer} />
               ))}
             </AnimatePresence>
           </div>
